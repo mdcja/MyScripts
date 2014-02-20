@@ -1,0 +1,24 @@
+#!/bin/bash
+#
+# Run once script
+#   Params - A command line program with or without arguments
+#   Post   - Script checks if program is running, if not executes it
+#
+
+# check that args were passed
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 COMMAND [ARGS]"
+    exit 1  # exit failure
+fi
+
+# check if app is running
+IS_RUNNING=$(ps aux | grep $1 | grep -v grep | grep -v run-once)
+if [[ -z "$IS_RUNNING" ]]; then
+    # program is not running
+    echo "> Starting $1"
+    $@ & # run program (in background) with arguments
+else
+    echo "W> $1 is already running."
+fi
+
+exit 0
