@@ -9,6 +9,8 @@
 # the way to display images, e.g. make the background fill the screen, or tile
 # the background image.
 #
+# Depends on: feh
+#
 
 # set verbosity
 VERBOSITY=0
