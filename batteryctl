@@ -1,0 +1,254 @@
+#!/bin/bash
+#
+# Author: Julian Martinez del Campo
+# Description: Control laptop battery
+#
+# This program allows a user to control the laptop's battery, as well as view
+# information about the battery.
+#
+# Dependencies: tpacpi-bat, acpi
+
+# Set verbosity
+VERBOSITY=0
+
+# Set battery control script
+BATTERY_CTRL=/usr/lib/perl5/vendor_perl/tpacpi-bat
+
+# Set acpi control
+ACPI_CTRL=/usr/bin/acpi
+
+# Default battery
+DEFAULT_BATTERY=1
+
+# Default charge threshold
+DEFAULT_START_CHARGE=40
+
+# Default stop charge threshold
+DEFAULT_STOP_CHARGE=80
+
+# Print verbose messages
+# Params: message to print
+verbose(){
+    if [ "$VERBOSITY" -ne 0 ]; then
+        echo "$@"
+    fi
+}
+
+# Print help dialog
+print_help(){
+    cat <<_END_HELP
+Usage: $(echo $0) [OPTION]... {COMMAND} [ARGS]
+Control systems battery.
+
+Available options are:
+  -h, --help        Print this help message.
+  -v, --verbose     Print verbose messages.
+
+Available commands are:
+  status                      Print the current status of the battery.
+  charge {start|stop|full}    Charge the battery. If limit is set, then it will
+                              only charge to set limits.
+  discharge {start|stop}      Discharge the battery.
+  limit {on [START STOP]|off} Turn on/off start and stop limits. Start/stop
+                              limits are in percentages.  
+_END_HELP
+}
+
+# Set start charge limit
+# Params: charge limit, defaults to 80%; battery number, default is 0.
+start_charge_limit(){
+    local LIMIT=${1:-$DEFAULT_START_CHARGE}
+    local BATNO=${2:-$DEFAULT_BATTERY}
+
+    # Set start charge threshold
+    $BATTERY_CTRL startChargeThreshold $BATNO $LIMIT
+}
+
+# Set stop charge limit
+# Params: charge limit, defaults to 40%; battery number, defaults to 1.
+stop_charge_limit(){
+    local LIMIT=${1:-$DEFAULT_START_CHARGE}
+    local BATNO=${2:-$DEFAULT_BATTERY}
+
+    # Set stop discharge threshold
+    $BATTERY_CTRL stopChargeThreshold $BATNO $LIMIT
+}
+
+# Discharge battery
+# Params: the discharge status, 0 for stop discharge and 1 for force discharge; battery number, default is 1.
+discharge(){
+    local DISCHARGING=${1:-0}
+    local BATNO=${2:-$DEFAULT_BATTERY}
+
+    # Set discharge
+    $BATTERY_CTRL forceDischarge $BATNO $DISCHARGING
+}
+
+# Inhibit battery charge
+# Params: the charge status, 0 for dont inhibit, 1 for inhibit; battery number, default is 1.
+inhibit(){
+    local CHARGING=${1:-0}
+    local BATNO=${2:-$DEFAULT_BATTERY}
+
+    # Set inhibit charge
+    $BATTERY_CTRL inhibitCharge $BATNO $CHARGING
+}
+
+# Get battery info
+# Params: battery number, default is 1.
+battery_status(){
+    local BATNO=${1:-$DEFAULT_BATTERY}
+
+    echo "$(acpi -bi)"    
+    echo "Start charge threshold: $($BATTERY_CTRL startChargeThreshold $BATNO)"
+    echo "Stop charge threshold: $($BATTERY_CTRL stopChargeThreshold $BATNO)"
+}
+
+# Main program
+# params: the command line options
+main(){
+    # Set default options
+    VERBOSITY=0     # set verbose off
+    ARGS=$(getopt -o h::v -l help:,verbose -- "$@")
+
+    # Error parsing command line options
+    if ! [[ $? -eq 0 ]]; then
+        # getopt will print error message for us
+        echo "Try '$0 --help' for more information."
+        exit 1
+    fi
+
+    set -- $ARGS
+
+    # Parse command line options
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            # Print help
+            -h|--help)
+                print_help
+                exit 0
+                ;;
+            # Set verbose
+            -v|--verbose)
+                VERBOSITY=1
+                shift
+                ;;
+            # End of arguments
+            --) shift; break
+                ;;
+        esac
+    done
+
+    # Check that program dependencies are met
+    if [[ ! -e "$BATTERY_CTRL" ]]; then
+        echo "E> Missing dependency: tpacpi-bat"
+        exit 1
+    fi
+
+    if [[ ! -e "$ACPI_CTRL" ]]; then
+        echo "E> Missing dependency: acpi"
+        exit 1
+    fi
+
+    # Check that we have permission to set thresholds
+    if [[ "$EUID" -ne 0 ]]; then
+        echo "This script must be run as root" 1>&2
+        exit 1
+    fi
+
+    # Get string of parameters and remove quotes
+    TEMP=$( echo "$@" | sed s/\'//g)
+    PARAMETERS=($TEMP)  # convert string to array
+
+    # Parse commands
+    case "${PARAMETERS[0]}" in
+        # Show battery status
+        status)
+            verbose "> Battery status"
+            battery_status
+            ;;
+        # Charge battery
+        charge)
+            case "${PARAMETERS[1]}" in
+                # Enabled charging
+                start)
+                    verbose "> Charging enabled"
+                    inhibit 0
+                    ;;
+                # Disable charging
+                stop)
+                    verbose "> Charging disabled"
+                    inhibit 1
+                    ;;
+                full)
+                    verbose "> Fully charging battery"
+                    start_charge_limit 99 $DEFAULT_BATTERY
+                    stop_charge_limit 99 $DEFAULT_BATTERY
+                    ;;
+                # Unknown option
+                *)
+                    echo "Unknown charge option"
+                    exit 1
+                    ;;
+                esac
+            ;;
+        # Discharge battery
+        discharge)
+            case "${PARAMETERS[1]}" in
+                # Start discharging
+                start)
+                    verbose "> Forced discharge enabled"
+                    discharge 1
+                    ;;
+                # Stop discharging
+                stop)
+                    verbose "> Forced discharge disabled"
+                    discharge 0
+                    ;;
+                # Unknown option
+                *)
+                    echo "Unknown discharge option"
+                    exit 1
+                    ;;
+                esac
+            ;;
+        # Set charge limits
+        limit)
+            case "${PARAMETERS[1]}" in
+                # Turn on charge limits
+                on)
+                    if [[ -z "${PARAMETERS[2]}" ]] || [[ -z "${PARAMETERS[3]}" ]]; then
+                        verbose "> Setting default charge limits"
+                        start_charge_limit $DEFAULT_START_CHARGE $DEFAULT_BATTERY
+                        stop_charge_limit $DEFAULT_STOP_CHARGE $DEFAULT_BATTERY
+                    else
+                        verbose "> Setting custom charge limits"
+                        start_charge_limit "${PARAMETERS[2]}" $DEFAULT_BATTERY
+                        stop_charge_limit "${PARAMETERS[3]}" $DEFAULT_BATTERY
+                    fi
+                    ;;
+                # Turn off charge limits
+                off)
+                    verbose "> Turning off charge limits"
+                    start_charge_limit 99 $DEFAULT_BATTERY
+                    stop_charge_limit 99 $DEFAULT_BATTERY
+                    ;;
+                # Unknown option
+                *)
+                    echo "Unknown charge limit option"
+                    exit 1
+                    ;;
+            esac
+            ;;
+        # Unknown command
+        *)
+            print_help
+            exit 1
+            ;;
+    esac
+}
+
+# Run main program
+main "$@"
+
+exit 0
