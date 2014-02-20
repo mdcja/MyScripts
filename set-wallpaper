@@ -1,0 +1,251 @@
+#!/bin/bash
+#
+# Author: Julian Martinez del Campo
+# Description: Set desktop wallpaper
+#
+# This program allows a user to set the desktop wallpaper by either specifying
+# an image to use as the background or a directory to randomly pick an image to
+# use as a wallpaper from. Additionally this program allows the user to select
+# the way to display images, e.g. make the background fill the screen, or tile
+# the background image.
+#
+
+# set verbosity
+VERBOSITY=0
+
+# Print verbose messages
+# params: message to print
+verbose(){
+    if [ "$VERBOSITY" -ne 0 ]; then
+        echo "$@"
+    fi
+}
+
+# Print help dialog
+print_help(){
+    cat <<_END_HELP  
+Usage: $(echo $0) [OPTION]... {FILE|DIRECTORY}
+Set the system wallpaper.
+
+Available options are:
+  -h, --help              Print this help message.
+  -v, --verbose           Print verbose messages.
+  -r, --recursive         Recursively find images.
+  -d, --mode=DISPLAY_MODE Set the display mode. Available Modes are: center,
+                          fill, max, scale, tile.
+  -c, --center            Center wallpaper.
+  -f, --fill              Like 'scale' but preserves aspect ratio by zooming
+                          the image until it fits. May cut off corners.
+  -m, --max               Like 'fill' but scale the image to the maximum size
+                          that fits the screen with back borders on one side.
+  -s, --scale             This will fill the whole background, but the images
+                          aspect ratio may not be preserved.
+  -t, --tile              Set wallpaper as tiled background.
+Note: the last selected display mode will be used.
+_END_HELP
+}
+
+# Get a random image
+# params: folder name, recursive
+get_random_image(){
+    local FOLDER=${1}   # get folder name
+    local RECURSIVE=${2:-0}
+    
+    # get a list of images from folder, shuffle, and select one
+    # allow only image types (jpg, jpeg, png)
+    if [[ "$RECURSIVE" -eq 1 ]]; then
+        local RANDOM_IMAGE=$(find "$FOLDER" -type f \
+            -name '*.jpg' -o \
+            -name '*.jpeg' -o \
+            -name '*.png' | shuf -n 1 )
+    else
+        local RANDOM_IMAGE=$(find "$FOLDER" -maxdepth 1 -type f \
+            -name '*.jpg' -o \
+            -name '*.jpeg' -o \
+            -name '*.png' | shuf -n 1 )
+    fi
+
+    #verbose "> Selected $RANDOM_IMAGE" # changes string!
+    
+    # print selected image
+    echo "$RANDOM_IMAGE"
+}
+
+# check if a file is an image (by file extension)
+# params: a file name
+check_image_filename(){
+    local FILENAME="${1}"               # get filename
+
+    local EXTENSION="${FILENAME##*.}"   # get extension
+
+    # check extension
+    if ! [[ "$EXTENSION" == 'jpeg' ||
+            "$EXTENSION" == 'jpg'  ||
+            "$EXTENSION" == 'png' ]]
+    then
+        verbose "E> $FILENAME is not an image!"
+        exit 1
+    fi
+}
+
+# Select an image or get a random image from a directory
+# params: a directory name or an image name
+select_image(){
+    local INPUT="${1}"          # get directory name or image name
+    local RECURSIVE="${2:-0}"   # recursive?
+
+    # check if we have an image or a direcotry
+    if [ -f "$INPUT" ]; then      # is file
+        check_image_filename "$INPUT"
+        local IMAGE=$INPUT
+    elif [ -d "$INPUT" ]; then    # is directory
+        local IMAGE=$(get_random_image "$INPUT" "$RECURSIVE")
+    else
+        verbose "E> Error! Invalid file/directory"
+        exit 1
+    fi
+
+    echo "$IMAGE"
+}
+
+# Set wallpaper using feh
+# params: the image filename to set
+#   the wallpaper display mode, available modes are:
+#   - center, fill, max, scale, tile
+set_wallpaper(){
+    local IMAGE="${1}"          # get image to display
+    local MODE="${2:-scale}"    # set display mode
+
+    verbose "> Setting $IMAGE ($MODE) as wallpaper"
+    case "$MODE" in
+        center)
+            feh --no-fehbg --no-xinerama --bg-scale "$IMAGE"
+            ;;
+        fill)
+            feh --no-fehbg --no-xinerama --bg-fill "$IMAGE"
+            ;;
+        max)
+            feh --no-fehbg --no-xinerama --bg-max "$IMAGE"
+            ;;
+        scale)
+            feh --no-fehbg --no-xinerama --bg-scale "$IMAGE"
+            ;;
+        tile)
+            feh --no-fehbg --no-xinerama --bg-tile "$IMAGE"
+            ;;
+        *)
+            verbose "E> Invalid display mode!"
+            exit 1
+            ;;
+    esac
+}
+
+# Main program
+# params: the command line options
+main(){
+    #local INPUT=$*                  # get input
+
+    # Set default options
+    VERBOSITY=0                     # set verbose off
+    MODE='scale'                    # set mode as scale by default
+    RECURSIVE=0                     # turn of recursion by default
+    ARGS=$(getopt -o hd:vcfmstr -l help,mode:,verbose,center,fill,max,scale,tile,recursive -- "$@")
+    
+    # error parsing command line options
+    if ! [[ $? -eq 0 ]]; then
+        # getopt will print error message for us
+        echo "Try '$0 --help' for more information."
+        exit 1
+    fi
+
+    set -- $ARGS
+
+    # Parse command line options
+    while [ $# -gt 0 ]
+    do
+        case "$1" in
+            # Print help
+            -h|--help) 
+                print_help
+                exit 0
+                ;;
+            # Set verbose
+            -v|--verbose) 
+                VERBOSITY=1
+                shift
+                ;;
+            # Set display mode
+            -d|--mode) 
+                shift
+                MODE="${1//\'}" # remove quotes from mode
+                # check that mode is valid
+                if ! [[ "$MODE" == 'center' ||
+                        "$MODE" == 'fill'   ||
+                        "$MODE" == 'max'    ||
+                        "$MODE" == 'scale'  ||
+                        "$MODE" == 'tile' ]]
+                then
+                    verbose "E> Invalid mode!"
+                    exit 1
+                fi
+
+                shift
+                ;;
+            # Center background
+            -c|--center)
+                shift
+                MODE='center'
+                ;;
+            # Fill background
+            -f|--fill)
+                shift
+                MODE='fill'
+                ;;
+            # maximize background
+            -m|--max)
+                shift
+                MODE='max'
+                ;;
+            # scale background
+            -s|--scale)
+                shift
+                MODE='scale'
+                ;;
+            # tile background
+            -t|--tile)
+                shift
+                MODE='tile'
+                ;;
+            # recursive find
+            -r|--recursive)
+                shift
+                RECURSIVE=1 
+                ;;
+            # End of arguments
+            --) shift; break
+                ;;
+        esac
+    done
+
+    # check if file/directory is passed
+    if [[ ! "$1" ]]; then
+        echo "Error! Missing {FILE|DIRECTORY}!"
+        print_help
+        exit 1
+    fi
+
+    # get the wallpaper
+    local INPUT=${1//\'}    # remove quotes
+    local IMAGE=$(select_image "$INPUT" "$RECURSIVE")
+    
+    # set wallpaper
+    set_wallpaper "$IMAGE" "$MODE"
+
+    # write current wallpaper to file
+    echo "$IMAGE" > "$HOME/.wallpaper"
+}
+
+# Run main program
+main "$@"
+
+exit 0
