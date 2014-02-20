@@ -1,0 +1,13 @@
+#!/bin/bash
+#
+# Automatically set the time
+#
+
+# Make sure runing as root
+if [[ $EUID -ne 0 ]]; then
+    echo "This script must be run as root" 1>&2
+    exit 1
+fi
+
+# Syncronize time with server
+ntpd -qg    # allow adjustment to be big, set time and quit
